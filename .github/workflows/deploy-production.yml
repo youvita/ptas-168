@@ -26,8 +26,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify (build + typecheck)
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm build` -> `turbo run build` tsc-compiles every TS package
+      # (backend/worker/bot/packages), so this catches their type errors.
+      - name: Build all packages
+        run: pnpm build
+
+      # The frontend builds with Vite (no tsc), so typecheck it (and the
+      # other packages that expose the script) explicitly. --if-present
+      # skips packages without a typecheck script.
+      - name: Typecheck
+        run: pnpm -r --if-present typecheck
+
   deploy:
     name: Build & Deploy
+    needs: verify
     runs-on: self-hosted
     timeout-minutes: 30
 
