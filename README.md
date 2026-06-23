@@ -125,7 +125,11 @@ pnpm db:deploy                            # prisma migrate deploy (prod-safe)
 pnpm db:studio                            # http://localhost:5555
 
 # Build everything (turbo: db → contracts → sdk → bank-parsers → apps)
-pnpm turbo run build
+pnpm build
+
+# Quality checks (the same ones CI gates deploys on)
+pnpm -r --if-present typecheck            # tsc --noEmit across packages
+pnpm --filter ptas168-backend test        # backend unit tests (vitest, Prisma-mocked)
 ```
 
 ## Environment
@@ -142,6 +146,15 @@ Two layers of env files, both gitignored:
 | worker        | `DATABASE_URL`, `REDIS_URL`, `OVERDUE_CRON`                                   |
 | telegram-bot  | `DATABASE_URL`, `REDIS_URL`, `TELEGRAM_BOT_TOKEN` (leave empty for stub mode) |
 | frontend      | `VITE_API_URL`, `VITE_FILE_URL` (build); `BACKEND_URL` (dev proxy target)     |
+
+## Continuous integration
+
+`.github/workflows/deploy-production.yml` runs on push to `main` (and manual dispatch) on the self-hosted runner. It has two jobs:
+
+1. **`verify`** — `pnpm install` → `pnpm build` → `pnpm -r --if-present typecheck` → backend unit tests. Build breakage or type errors stop the pipeline here.
+2. **`deploy`** — `needs: verify`, so it only runs if the gate passes: builds the production images, runs migrations + seed, restarts the stack, and health-checks the backend.
+
+Lint and the frontend Playwright E2E suite are **not** in the gate yet — there's no ESLint config, and the E2E suite needs a `baseURL` fix. Widen the `verify` job once those are addressed.
 
 ## Per-app docs
 
