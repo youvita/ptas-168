@@ -13,7 +13,7 @@ ptas168/
 ├── apps/
 │   ├── backend/                    Express + TypeScript + Prisma 5 + PostgreSQL — :3001
 │   │   └── CLAUDE.md               READ THIS before touching backend code
-│   ├── frontend/                   Vite + React 18 + Zustand (plain JS, not TS) — :8080
+│   ├── frontend/                   Vite + React 18 + Zustand (TypeScript) — :8080
 │   │   └── CLAUDE.md               READ THIS before touching frontend code
 │   ├── worker/                     BullMQ jobs: cron + event-driven (no HTTP surface)
 │   └── telegram-bot/               grammy long-polling + BullMQ consumer (no HTTP surface)
@@ -54,7 +54,7 @@ pnpm db:seed                              # bootstrap admin user + system servic
 
 # dev — each process in its own terminal
 pnpm dev:backend                          # api on http://localhost:3001
-pnpm dev:frontend                         # vite on http://localhost:8080/Ptas168_Frontend/
+pnpm dev:frontend                         # vite on http://localhost:8080/
 pnpm --filter @ptas/worker dev            # BullMQ worker (overdue cron + invoice-paid)
 pnpm --filter @ptas/telegram-bot dev      # grammy bot (stub mode without TELEGRAM_BOT_TOKEN)
 
@@ -109,12 +109,12 @@ Five distinct runtime contexts, two distinct languages. Before editing code, **a
 
 |  | `apps/backend` | `apps/frontend` | `apps/worker` | `apps/telegram-bot` |
 |---|---|---|---|---|
-| Language | **TypeScript** strict | **JavaScript** (.js/.jsx) | TypeScript | TypeScript |
-| Module system | CommonJS | ESM | CommonJS | CommonJS |
+| Language | **TypeScript** strict | **TypeScript** (.ts/.tsx) | TypeScript | TypeScript |
+| Module system | ESM (NodeNext) | ESM (bundler) | ESM (NodeNext) | ESM (NodeNext) |
 | Runtime | Node ≥ 20 (Express) | Browser (Vite) | Node ≥ 20 (BullMQ) | Node ≥ 20 (grammy + BullMQ) |
 | Persistence | Postgres via Prisma | localStorage + Zustand | Postgres + Redis | Postgres + Redis |
-| Port | `:3001` | `:8080` (base `/Ptas168_Frontend/`) | none (no HTTP) | none (no HTTP) |
-| Entry | [src/server.ts](apps/backend/src/server.ts) | [src/main.jsx](apps/frontend/src/main.jsx) | [src/index.ts](apps/worker/src/index.ts) | [src/index.ts](apps/telegram-bot/src/index.ts) |
+| Port | `:3001` | `:8080` (base `/`) | none (no HTTP) | none (no HTTP) |
+| Entry | [src/server.ts](apps/backend/src/server.ts) | [src/main.tsx](apps/frontend/src/main.tsx) | [src/index.ts](apps/worker/src/index.ts) | [src/index.ts](apps/telegram-bot/src/index.ts) |
 
 ### Where each concept lives — never mix these up
 
@@ -181,7 +181,7 @@ The user reported "Billing displays count but no data." The instinct could be to
 - **No notifications without the worker.** The backend never writes to the `notifications` table — only `apps/worker` does (via `daily-overdue-check` and `invoice-paid` handlers). If you're testing notifications locally, the worker must be running.
 - **Bot stub mode** — when `TELEGRAM_BOT_TOKEN` is empty, `apps/telegram-bot` skips grammy polling but still consumes the BullMQ `telegram-send` queue (logs "would have sent"). Useful for local dev without @BotFather.
 - **`tsx watch`** picks up `.env` file changes — the dev backend hot-reloads on env edits, occasionally leaving stuck `node` processes on port 3001 (`pkill -f tsx` to clear).
-- **Vite dev base path is `/Ptas168_Frontend/`** — anything that hardcodes `/` will break in dev.
+- **Vite base path is `/`** ([apps/frontend/vite.config.ts](apps/frontend/vite.config.ts)) — the app serves from the root in both dev and the production bundle. (It historically served under `/Ptas168_Frontend/`; that prefix is gone.)
 
 ## When in doubt — read the per-app docs
 

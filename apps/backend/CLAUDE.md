@@ -88,7 +88,7 @@ npm run prisma:migrate -- --name init
 npm run dev
 ```
 
-The dev server listens on `http://localhost:3000`. The frontend's Vite dev server expects the API at `/api` — see [README § Frontend Integration](README.md#frontend-integration-notes) for how to wire it.
+The dev server listens on `http://localhost:3001`. The frontend's Vite dev server (`:8080`) proxies `/api/*` to it — see [apps/frontend/vite.config.ts](../frontend/vite.config.ts).
 
 ## Testing
 

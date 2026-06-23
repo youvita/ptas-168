@@ -18,7 +18,7 @@ Shared types + Zod schemas for the PTAS168 monorepo. The wire-format source of t
 
 ## Build setup
 
-- `tsc` emits **CommonJS** to `dist/` with declaration files + source maps. Matches the backend's `"type": "commonjs"`. Vite handles CJS interop on the frontend side.
+- `tsc` emits **ESM** (NodeNext) to `dist/` with declaration files + source maps. `package.json` is `"type": "module"`, matching the backend and every other package in the monorepo.
 - `package.json` `main` is `./dist/index.js`, `types` is `./dist/index.d.ts`.
 - Turbo wires the dependency edge automatically: `pnpm turbo run build --filter=ptas168-backend` builds this package first. Don't need to script it manually.
 - For iterative work in another package, run `pnpm --filter @ptas/contracts dev` (tsc watch) in one terminal and consumer dev in another.
