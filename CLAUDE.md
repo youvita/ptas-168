@@ -50,7 +50,6 @@ pnpm db:migrate                           # prisma migrate dev (create + apply)
 pnpm db:deploy                            # prisma migrate deploy (prod-safe)
 pnpm db:studio                            # http://localhost:5555
 pnpm db:seed                              # bootstrap admin user + system services + settings
-pnpm db:demo-seed                         # demo dataset (idempotent demo-* ids)
 
 # dev — each process in its own terminal
 pnpm dev:backend                          # api on http://localhost:3001
@@ -82,7 +81,7 @@ pnpm turbo run build
 
 | Layer | Package/App | What it does |
 |---|---|---|
-| Database layer | `@ptas/db` | Owns `prisma/schema.prisma`, migrations, seed + demo-seed. Apps that touch the DB depend on this (each app still instantiates its own `PrismaClient` for connection-pool tuning, but the schema and generated client are shared via pnpm-hoisted `@prisma/client`). |
+| Database layer | `@ptas/db` | Owns `prisma/schema.prisma`, migrations, seed. Apps that touch the DB depend on this (each app still instantiates its own `PrismaClient` for connection-pool tuning, but the schema and generated client are shared via pnpm-hoisted `@prisma/client`). |
 | Wire-format contracts | `@ptas/contracts` | All Zod schemas + DTO types. **No logic.** Both reads and writes flow through these. |
 | HTTP client | `@ptas/sdk` | The frontend's only path to the backend. Wraps fetch, owns the 3 wire→UI adapters (`adaptInvoice`, `groupMeterReadings`, `parseInvoiceSettings`). ESM. |
 | Bank parsers | `@ptas/bank-parsers` | Pure regex-based parsers for bank confirmation text. Shared by backend (`/api/bank-payments` list) and bot (raw-message ingestion). |

@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       port: 8080,
       host: true,
       strictPort: true,
+      allowedHosts: ['ptas168.kilozin.xyz'],
       proxy: {
         // /api/* → ptas168-api (backend listens on :3001; override via BACKEND_URL in .env.local)
         '/api': {

@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 .turbo/
 dist/
 .next/
@@ -10,8 +11,9 @@ coverage/
 # if you ever want one.
 apps/backend/uploads/
 
-# env files (keep .env.example tracked inside each app)
+# env files (keep .env.example and .env.production.example tracked)
 .env
+.env.production
 .env.*.local
 .env.local
 
@@ -27,5 +29,3 @@ Thumbs.db
 # editor
 .vscode/
 .idea/
-infrastructure/docker/cloudflared/creds.json
-CLOUDFLARE_TUNNEL_TOKEN

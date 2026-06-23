@@ -1,0 +1,183 @@
+# PTAS168 — Dockerized dev environment
+#
+# Runs the full stack in Docker with hot reload via bind-mounted source code.
+# Same ports as native dev so existing workflows (browser bookmarks, Postman
+# collections, etc.) keep working.
+#
+# First run:
+#   pnpm dev:docker:up          # builds image, installs deps, starts everything
+#
+# Day-to-day:
+#   pnpm dev:docker:up          # start (fast — deps cached in named volume)
+#   pnpm dev:docker:down        # stop (data preserved)
+#   pnpm dev:docker:logs        # follow logs
+#   pnpm dev:docker:install     # re-run after adding/removing deps
+#
+# How it works:
+#   - A one-shot `setup` service runs `pnpm install` + `prisma generate` into
+#     a named volume (dev_node_modules). All app services share this volume.
+#   - The repo root is bind-mounted at /repo so source edits on the host are
+#     reflected instantly (tsx watch / vite HMR pick them up).
+#   - An anonymous volume at /repo/node_modules ensures the container uses
+#     Linux-native deps from the named volume, not the host's macOS modules.
+
+name: ptas168-dev
+
+x-common: &common
+  build:
+    context: ../..
+    dockerfile: infrastructure/docker/Dockerfile.dev
+  volumes:
+    - ../..:/repo
+    - dev_node_modules:/repo/node_modules
+  restart: unless-stopped
+
+services:
+  # ── data plane ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: ptas168_dev_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ptas168_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ptas168_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7
+    container_name: ptas168_dev_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── setup (one-shot) ────────────────────────────────────────────────────
+  # Installs deps into the named volume and generates Prisma client.
+  # Runs on every `docker compose up` but exits quickly when deps are cached.
+  setup:
+    <<: *common
+    container_name: ptas168_dev_setup
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "pnpm install --frozen-lockfile && pnpm --filter @ptas/db generate && cd /repo/packages/db && npx prisma migrate deploy && npx prisma db seed"
+
+  # ── apps ────────────────────────────────────────────────────────────────
+  backend:
+    <<: *common
+    container_name: ptas168_dev_backend
+    working_dir: /repo/apps/backend
+    command: npx tsx watch src/server.ts
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ptas168_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev_jwt_secret_change_me_minimum_32_characters_long
+      JWT_EXPIRES_IN: 24h
+      TELEGRAM_BOT_TOKEN: unused_in_backend_set_in_telegram_bot
+      TELEGRAM_BANK_BOT_TOKEN: ""
+      LOG_LEVEL: debug
+      CORS_ORIGIN: http://localhost:8080
+      API_BASE_PATH: /api
+      UPLOAD_DIR: /repo/apps/backend/uploads
+      FILE_URL_BASE: ""
+      R2_ACCOUNT_ID: ""
+      R2_ACCESS_KEY_ID: ""
+      R2_SECRET_ACCESS_KEY: ""
+      R2_BUCKET: ""
+      R2_PUBLIC_URL: ""
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *common
+    container_name: ptas168_dev_worker
+    working_dir: /repo/apps/worker
+    command: npx tsx watch src/index.ts
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ptas168_dev
+      REDIS_URL: redis://redis:6379
+      OVERDUE_CRON: "*/5 * * * *"
+      LOG_LEVEL: debug
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  telegram-bot:
+    <<: *common
+    container_name: ptas168_dev_telegram_bot
+    working_dir: /repo/apps/telegram-bot
+    command: npx tsx watch src/index.ts
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ptas168_dev
+      REDIS_URL: redis://redis:6379
+      TELEGRAM_BOT_TOKEN: ""
+      LOG_LEVEL: debug
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    <<: *common
+    container_name: ptas168_dev_frontend
+    working_dir: /repo/apps/frontend
+    command: npx vite --host 0.0.0.0 --port 8080
+    environment:
+      NODE_ENV: development
+      BACKEND_URL: http://backend:3001
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+    name: ptas168_dev_postgres_data
+  redis_data:
+    name: ptas168_dev_redis_data
+  dev_node_modules:
+    name: ptas168_dev_node_modules

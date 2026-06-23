@@ -1,0 +1,232 @@
+# PTAS168 — production stack
+#
+# Runs the full application in Docker: PostgreSQL + Redis + all four Node apps.
+# Uses different ports and volumes from the dev compose file so both can run
+# on the same machine simultaneously.
+#
+# Quick start:
+#   1. cp .env.production.example .env.production   # fill in secrets
+#   2. pnpm prod:build                              # build all images
+#   3. pnpm prod:migrate                            # run prisma migrate deploy
+#   4. pnpm prod:seed                               # seed admin user + services
+#   5. pnpm prod:up                                 # bring everything online
+#
+# Shorthand scripts (defined in root package.json):
+#   pnpm prod:build       # build all images
+#   pnpm prod:up          # start all services (detached)
+#   pnpm prod:down        # stop all services (data preserved)
+#   pnpm prod:logs        # follow logs across all services
+#   pnpm prod:migrate     # prisma migrate deploy (safe, no dev flow)
+#   pnpm prod:seed        # seed admin + system services
+#   pnpm prod:psql        # psql shell into the prod DB
+
+name: ptas168-prod
+
+services:
+  # ── data plane ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: ptas168_prod_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ptas168_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ptas168_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    image: redis:7
+    container_name: ptas168_prod_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-}"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ── migration runner ────────────────────────────────────────────────────
+  # One-shot service: runs prisma migrate deploy then exits.
+  # `pnpm prod:migrate` triggers this manually; backend depends on it
+  # only when using `pnpm prod:up --profile migrate`.
+  migrate:
+    image: ptas168-backend:latest
+    container_name: ptas168_prod_migrate
+    profiles: ["migrate"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-ptas168_prod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /repo/packages/db
+    command: ["npx", "prisma", "migrate", "deploy"]
+
+  seed:
+    image: ptas168-backend:latest
+    container_name: ptas168_prod_seed
+    profiles: ["seed"]
+    environment:
+      # Override NODE_ENV so the seed guard passes — this is an intentional
+      # one-shot operation, not an always-running production service.
+      NODE_ENV: seed
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-ptas168_prod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /repo/packages/db
+    command: ["npx", "prisma", "db", "seed"]
+
+  # ── apps ────────────────────────────────────────────────────────────────
+  backend:
+    image: ptas168-backend:latest
+    container_name: ptas168_prod_backend
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-ptas168_prod}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production (min 32 chars)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-unused_in_backend}
+      TELEGRAM_BANK_BOT_TOKEN: ${TELEGRAM_BANK_BOT_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8180}
+      API_BASE_PATH: ${API_BASE_PATH:-/api}
+      UPLOAD_DIR: /data/uploads
+      FILE_URL_BASE: ${FILE_URL_BASE:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-3101}:3001"
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  worker:
+    image: ptas168-worker:latest
+    container_name: ptas168_prod_worker
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-ptas168_prod}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
+      OVERDUE_CRON: ${OVERDUE_CRON:-0 9 * * *}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  telegram-bot:
+    image: ptas168-telegram-bot:latest
+    container_name: ptas168_prod_telegram_bot
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/telegram-bot/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?err}@postgres:5432/${POSTGRES_DB:-ptas168_prod}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  frontend:
+    image: ptas168-frontend:latest
+    container_name: ptas168_prod_frontend
+    restart: unless-stopped
+    build:
+      context: ../..
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_FILE_URL: ${VITE_FILE_URL:-/files}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8180}:80"
+    depends_on:
+      backend:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# Cloudflare Tunnel runs as a machine-level brew service, not in Docker.
+# See: brew services info cloudflared
+
+volumes:
+  postgres_data:
+    name: ptas168_prod_postgres_data
+  redis_data:
+    name: ptas168_prod_redis_data
+  uploads_data:
+    name: ptas168_prod_uploads_data

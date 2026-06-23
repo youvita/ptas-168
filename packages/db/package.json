@@ -16,7 +16,6 @@
     "deploy": "prisma migrate deploy",
     "studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
-    "demo-seed": "tsx prisma/demo-seed.ts",
     "psql": "psql \"$DATABASE_URL\"",
     "typecheck": "tsc --noEmit"
   },

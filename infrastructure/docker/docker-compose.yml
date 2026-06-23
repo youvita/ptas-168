@@ -1,19 +1,18 @@
-# PTAS168 — local development infrastructure
+# PTAS168 — development infrastructure
 #
-# Brings up the full stack: PostgreSQL + Redis (data plane) plus all four
-# Node apps (backend, worker, telegram-bot) and the static frontend.
-# Ports are bound to 127.0.0.1 so containers are not exposed on the LAN.
-# Volumes are named so data persists across `docker compose down` and is only
-# wiped by `docker compose down -v` (used by the `db:reset` script).
+# Primary use: `pnpm db:up` starts Postgres + Redis for local dev (apps run
+# natively via tsx/Vite). The app services below are available for optional
+# full-stack Docker testing via `pnpm compose:up`.
 #
-# Run from the monorepo root via:
+# For PRODUCTION Docker, use docker-compose.production.yml instead:
+#   pnpm prod:build / prod:up / prod:down / prod:logs
+#
+# Dev scripts (defined in root package.json):
+#   pnpm db:up                 # postgres + redis only (main dev workflow)
 #   pnpm compose:build         # build all images
 #   pnpm compose:up            # bring everything online (detached)
 #   pnpm compose:down          # stop everything (data preserved)
 #   pnpm compose:logs          # follow logs across all services
-#
-# Or for just the data plane (legacy):
-#   pnpm db:up                 # postgres + redis only
 #
 # `apps/*/Dockerfile` use the repo root as their build context, so the
 # compose file must be invoked with `-f infrastructure/docker/docker-compose.yml`
@@ -209,36 +208,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Cloudflare Quick Tunnel — opt-in via the `tunnel` profile so the normal
-  # `pnpm compose:up` doesn't spin up a public URL by surprise. Starts a
-  # throwaway *.trycloudflare.com URL valid until the container stops; the
-  # URL itself is printed on stdout (`docker logs ptas168_cloudflared` or
-  # `pnpm compose:tunnel:url`). No Cloudflare account, no domain, no token.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: ptas168_cloudflared
-    restart: unless-stopped
-    # Named tunnel mode — routes ptas168.kilozin.xyz and pos168.kilozin.xyz
-    # to their respective frontend containers via host ports.
-    # network_mode: host lets cloudflared reach localhost:8080 (ptas168) and
-    # localhost:8081 (pos168) which live in separate docker-compose projects.
-    #
-    # To activate: place your creds.json in infrastructure/docker/cloudflared/
-    # and replace REPLACE_WITH_YOUR_TUNNEL_ID in cloudflared/config.yml.
-    #
-    # Quick tunnel (no account/domain) is no longer used. If you need a
-    # throwaway URL for local testing use:
-    #   docker run --rm cloudflare/cloudflared tunnel --url http://host.docker.internal:8080
-    network_mode: host
-    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      frontend:
-        condition: service_started
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+# Cloudflare Tunnel runs as a machine-level brew service, not in Docker.
+# See: brew services info cloudflared
 
 volumes:
   postgres_data:

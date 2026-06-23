@@ -74,7 +74,7 @@ export const updateUserSchema = z
     password: z.string().min(6).max(120).optional(),
   })
   .strict()
-export type UpdateUserInput = z.infer<typeof updateUserSchema>
+export type UpdateUserInput = z.infer<typeof updateUserSchema> 
 
 // Read DTO + JWT payload ────────────────────────────────────────────────────
 

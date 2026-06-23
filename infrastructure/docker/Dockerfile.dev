@@ -1,0 +1,13 @@
+# Thin dev base image — Node 22 + pnpm 11.3.
+# Used by docker-compose.dev.yml for all services. Source code is bind-mounted
+# at runtime; this image only provides the runtime and package manager.
+
+ARG NODE_VERSION=22
+
+FROM node:${NODE_VERSION}-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && corepack enable \
+ && corepack prepare pnpm@11.3.0 --activate
+WORKDIR /repo
