@@ -56,6 +56,13 @@ jobs:
       - name: Typecheck
         run: pnpm -r --if-present typecheck
 
+      # Backend unit tests run against Prisma module mocks (no live DB).
+      # Scoped to the backend on purpose: the frontend Playwright E2E
+      # suite can't run headlessly here, so a blanket `pnpm test` would
+      # fail. Widen this once the E2E suite is fixed.
+      - name: Test (backend)
+        run: pnpm --filter ptas168-backend test
+
   deploy:
     name: Build & Deploy
     needs: verify
