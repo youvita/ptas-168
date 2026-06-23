@@ -16,7 +16,7 @@ ptas168/
 │   ├── contracts/      Zod schemas + DTO types (single source of truth)
 │   ├── sdk/            Frontend HTTP client + wire→UI adapters
 │   └── bank-parsers/   Pure regex parsers for bank confirmation text
-└── infrastructure/docker/   Docker Compose files (base, dev, prod) + Postgres 16 + Redis 7
+└── infrastructure/docker/   Docker Compose files (dev, prod) + Postgres 16 + Redis 7
 ```
 
 Three Node runtimes share Postgres + Redis: **backend** (HTTP), **worker** (BullMQ consumer), **telegram-bot** (BullMQ consumer + Telegram polling). Cross-process traffic goes over Redis only — no app makes HTTP calls to another. The frontend is a static bundle the browser runs.
@@ -33,7 +33,6 @@ Apps run natively on your machine; only Postgres + Redis run in Docker.
 
 ```bash
 pnpm install
-cp .env.example .env                      # compose-level vars (db:* / compose:* read this)
 pnpm db:up                                # start postgres + redis containers
 pnpm db:migrate                           # apply schema
 pnpm db:seed                              # bootstrap admin/admin123
@@ -64,21 +63,7 @@ pnpm dev:docker:psql                      # psql shell
 pnpm dev:docker:reset                     # wipe everything (DB + Redis + node_modules)
 ```
 
-Same ports as native dev (`:5432`, `:6379`, `:3001`, `:8080`) — stop one before starting the other.
-
-## Docker (built images)
-
-Run the full stack from pre-built production-style images (`ptas168-*:latest`) but on the dev `.env` and dev ports — useful for testing a built image locally without the production config. Driven by the base `docker-compose.yml` (the same file `db:up` borrows Postgres + Redis from).
-
-```bash
-pnpm compose:build                        # build the 4 app images (backend, worker, bot, frontend)
-pnpm compose:up                           # start the full stack
-pnpm compose:logs                         # follow all logs
-pnpm compose:restart                      # restart all
-pnpm compose:down                         # stop (data preserved)
-```
-
-Reads `.env` at the repo root. Shares the same ports as native/Docker dev (`:3001`, `:8080`) — only one stack at a time.
+Same ports as native dev (`:5432`, `:6379`, `:3001`, `:8080`) — stop one before starting the other. `pnpm db:up` (native dev) and `pnpm dev:docker:up` share this same compose file, so `db:up` just starts its `postgres` + `redis` services.
 
 ## Production (Docker)
 
@@ -113,8 +98,9 @@ pnpm prod:psql                              # psql shell into prod DB
 ## Common commands
 
 ```bash
-# Infra (native dev)
-pnpm db:up | db:down | db:reset           # docker compose (postgres + redis only)
+# Infra (native dev) — starts Postgres + Redis from the dev compose file
+pnpm db:up | db:down                      # start / stop postgres + redis
+pnpm db:reset                             # down -v + up (wipes the dev volumes)
 pnpm db:psql                              # psql shell
 pnpm db:logs                              # follow container logs
 
@@ -136,7 +122,7 @@ pnpm --filter ptas168-backend test        # backend unit tests (vitest, Prisma-m
 
 Two layers of env files, both gitignored:
 
-- **Compose-level** — a repo-root `.env` (copy from `.env.example`) and `.env.production` (copy from `.env.production.example`). `docker compose --env-file` substitutes `${VAR}` references in the compose files; every `pnpm db:*`, `compose:*`, and `prod:*` script reads one of these. Vars have sensible defaults via `${VAR:-default}`, so you only set what you want to override.
+- **Compose-level (production only)** — a repo-root `.env.production` (copy from `.env.production.example`), read by the `prod:*` scripts via `docker compose --env-file` to substitute `${VAR}` references in `docker-compose.production.yml`. Vars have sensible defaults via `${VAR:-default}`, so you only set what you override. The dev compose file uses hardcoded dev defaults, so `db:*` / `dev:docker:*` need no env file.
 - **Per-process** — each app loads its own `.env.development` / `.env.production`. Required keys:
 
 | Process       | Required keys                                                                |

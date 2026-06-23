@@ -25,7 +25,8 @@ ptas168/
 │   └── bank-parsers/               @ptas/bank-parsers — pure bank-text parsers (ABA, …)
 ├── infrastructure/
 │   └── docker/
-│       └── docker-compose.yml      Postgres 16 + Redis 7 for local dev
+│       ├── docker-compose.dev.yml         dev stack (hot-reload); db:* starts its Postgres 16 + Redis 7
+│       └── docker-compose.production.yml  production stack (built images, migrate + seed)
 ├── pnpm-workspace.yaml
 ├── turbo.json
 ├── MIGRATION_ANALYSIS.md           Phase 1+2 inventory (still useful as a map)
