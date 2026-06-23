@@ -1,0 +1,157 @@
+# Deploy production — build Docker images, run migrations, restart containers.
+#
+# Trigger: push to main, or manual dispatch.
+# Runner: self-hosted (the Mac Mini running Docker + cloudflared).
+#
+# Required GitHub secrets:
+#   POSTGRES_PASSWORD       — prod database password
+#   JWT_SECRET              — min 32 chars
+#   TELEGRAM_BOT_TOKEN      — (optional, leave empty for stub mode)
+#   TELEGRAM_BANK_BOT_TOKEN — (optional)
+#   R2_ACCOUNT_ID           — (optional, for Cloudflare R2 uploads)
+#   R2_ACCESS_KEY_ID        — (optional)
+#   R2_SECRET_ACCESS_KEY    — (optional)
+#   R2_BUCKET               — (optional)
+#   R2_PUBLIC_URL           — (optional)
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write .env.production
+        run: |
+          cat > .env.production << 'ENVEOF'
+          POSTGRES_DB=ptas168_prod
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PORT=5433
+
+          REDIS_PASSWORD=
+          REDIS_PORT=6380
+
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN=24h
+          BACKEND_PORT=3101
+          CORS_ORIGIN=${{ vars.CORS_ORIGIN || 'https://ptas168.kilozin.xyz' }}
+          API_BASE_PATH=/api
+          LOG_LEVEL=info
+
+          FRONTEND_PORT=8180
+          VITE_API_URL=/api
+          VITE_FILE_URL=/files
+
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BANK_BOT_TOKEN=${{ secrets.TELEGRAM_BANK_BOT_TOKEN }}
+
+          R2_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET=${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
+
+          OVERDUE_CRON=0 9 * * *
+          FILE_URL_BASE=${{ vars.FILE_URL_BASE || '' }}
+          ENVEOF
+          chmod 600 .env.production
+
+      - name: Build Docker images
+        run: >
+          docker compose
+          --env-file .env.production
+          -f infrastructure/docker/docker-compose.production.yml
+          build
+
+      - name: Start infrastructure
+        run: >
+          docker compose
+          --env-file .env.production
+          -f infrastructure/docker/docker-compose.production.yml
+          up -d postgres redis
+
+      - name: Wait for Postgres healthy
+        run: |
+          echo "Waiting for Postgres..."
+          for i in $(seq 1 30); do
+            if docker exec ptas168_prod_postgres pg_isready -U postgres -d ptas168_prod >/dev/null 2>&1; then
+              echo "Postgres is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres failed to become healthy"
+          exit 1
+
+      - name: Run migrations
+        run: >
+          docker compose
+          --env-file .env.production
+          -f infrastructure/docker/docker-compose.production.yml
+          run --rm migrate
+
+      - name: Seed database
+        run: >
+          docker compose
+          --env-file .env.production
+          -f infrastructure/docker/docker-compose.production.yml
+          run --rm seed
+
+      - name: Deploy application
+        run: >
+          docker compose
+          --env-file .env.production
+          -f infrastructure/docker/docker-compose.production.yml
+          up -d postgres redis backend worker telegram-bot frontend
+
+      - name: Wait for backend healthy
+        run: |
+          echo "Waiting for backend health check..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3101/api/health >/dev/null 2>&1; then
+              echo "Backend is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend health check failed"
+          docker logs ptas168_prod_backend --tail 50
+          exit 1
+
+      - name: Verify all containers running
+        run: |
+          echo "=== Production containers ==="
+          docker ps --filter "name=ptas168_prod" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+          echo ""
+          # Fail if any expected container is not running
+          for svc in postgres redis backend worker telegram_bot frontend; do
+            if ! docker ps --format '{{.Names}}' | grep -q "ptas168_prod_${svc}"; then
+              echo "ERROR: ptas168_prod_${svc} is not running"
+              docker logs "ptas168_prod_${svc}" --tail 20 2>/dev/null
+              exit 1
+            fi
+          done
+          echo "All containers running."
+
+      - name: Clean up old images
+        if: success()
+        run: docker image prune -f
