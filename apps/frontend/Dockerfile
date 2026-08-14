@@ -38,8 +38,10 @@ COPY apps/frontend ./apps/frontend
 # a separate API host.
 ARG VITE_API_URL=/api
 ARG VITE_FILE_URL=/files
+ARG VITE_BASE_PATH=/
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_FILE_URL=$VITE_FILE_URL
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 
 RUN pnpm turbo run build --filter=pbms-app...
 
