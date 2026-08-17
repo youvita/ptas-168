@@ -87,14 +87,12 @@ GitHub Actions at [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml):
 | Pull request | CI — `pnpm install`, Prisma generate, turbo build, backend tests |
 | Push to `main` (or **Run workflow**) | CI, then deploy on the self-hosted Mac Mini, then a Telegram status message |
 
-Deploy syncs the built monorepo to `$HOME/apps/Ptas168`, writes each process's `.env.production` from GitHub secrets, applies Prisma migrations, reloads PM2 (`ptas168-api`, `ptas168-worker`, `ptas168-telegram-bot`), and rsyncs the Vite `dist/` to Tomcat `ROOT` (override with the `FRONTEND_DEPLOY_DIR` variable). Seed is **not** run — `pnpm db:seed` is blocked in production.
+Deploy rebuilds the existing Docker stack on the Mini (`ptas168_*` containers) with remapped host ports so it does not collide with SecureScan (`:3001` / `:5432`) or `macmini-edge` (`:8080`). Seed is **not** run — `pnpm db:seed` is blocked in production. Cloudflared is left to the Mini’s existing `macmini-tunnel` container.
 
 ### GitHub secrets
 
 | Secret | Required | Used by |
 |--------|----------|---------|
-| `DATABASE_URL` | yes | backend, worker, telegram-bot, Prisma migrate |
-| `REDIS_URL` | yes | backend, worker, telegram-bot |
 | `JWT_SECRET` | yes | backend (≥ 32 chars) |
 | `TELEGRAM_BOT_TOKEN` | yes | Mini App / grammY bot, and deploy Telegram notify |
 | `TELEGRAM_CHAT_ID` | no* | chat/group that receives deploy success/failure |
@@ -104,18 +102,20 @@ Deploy syncs the built monorepo to `$HOME/apps/Ptas168`, writes each process's `
 
 \*Notify is skipped (deploy still succeeds) if `TELEGRAM_CHAT_ID` is missing.
 
+Postgres and Redis stay on the Mini Docker network (`postgres:5432` / `redis:6379` inside compose). Host publish ports default to **5433** / **6379** / **3002** / **8082**.
+
 ### GitHub variables (optional overrides)
 
-| Variable | Default |
+| Variable | Default (Mini Mac) |
 |----------|---------|
 | `CORS_ORIGIN` | `https://ptas168.kilozin.xyz` |
-| `VITE_API_URL` | `https://ptas168.kilozin.xyz/api` |
-| `VITE_FILE_URL` | `https://cdn.kilozin.xyz` |
 | `FILE_URL_BASE` | `https://cdn.kilozin.xyz` |
-| `API_BASE_PATH` | `/api` |
-| `FRONTEND_DEPLOY_DIR` | `/usr/local/Cellar/tomcat@10/10.1.52/libexec/webapps/ROOT` |
+| `POSTGRES_PORT` | `5433` |
+| `REDIS_PORT` | `6379` |
+| `BACKEND_PORT` | `3002` |
+| `FRONTEND_PORT` | `8082` |
 
-The self-hosted runner needs Node-capable `actions/setup-node`, pnpm via Corepack, global `pm2`, rsync, and the Tomcat webapps path (or `FRONTEND_DEPLOY_DIR`). Postgres + Redis must already be reachable at `DATABASE_URL` / `REDIS_URL`.
+The self-hosted runner needs Docker (the `ptas168_*` stack already running) and network access to GitHub. Do not start a second Cloudflared from this workflow.
 
 ## Per-app docs
 
