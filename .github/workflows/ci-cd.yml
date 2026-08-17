@@ -103,9 +103,10 @@ jobs:
       - name: Build and start Docker stack
         run: |
           # LaunchAgent sessions cannot unlock osxkeychain. Isolate Docker
-          # config so public Hub pulls skip the GUI helper — but keep the
-          # Compose CLI plugin visible (a bare DOCKER_CONFIG hides it, and
-          # then `docker` treats --env-file as its own flag).
+          # config so public Hub pulls skip the GUI helper — but keep CLI
+          # plugins (compose + buildx). Do not set --project-directory to
+          # the repo root: compose would resolve context `../..` to
+          # `_work/` instead of the checkout.
           export DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
           mkdir -p "$DOCKER_CONFIG/cli-plugins"
           printf '{}\n' > "$DOCKER_CONFIG/config.json"
@@ -114,16 +115,21 @@ jobs:
             /usr/local/lib/docker/cli-plugins \
             "${HOME}/.docker/cli-plugins"
           do
-            if [ -x "$d/docker-compose" ]; then
-              ln -sf "$d/docker-compose" "$DOCKER_CONFIG/cli-plugins/docker-compose"
+            if [ -d "$d" ]; then
+              for plugin in "$d"/docker-*; do
+                [ -e "$plugin" ] || continue
+                ln -sf "$plugin" "$DOCKER_CONFIG/cli-plugins/$(basename "$plugin")"
+              done
               break
             fi
           done
 
+          ENV_FILE="${GITHUB_WORKSPACE}/.env"
+          COMPOSE_FILE="${GITHUB_WORKSPACE}/infrastructure/docker/docker-compose.yml"
           if docker compose version >/dev/null 2>&1; then
-            COMPOSE=(docker compose --project-directory . -f infrastructure/docker/docker-compose.yml)
+            COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
           elif command -v docker-compose >/dev/null 2>&1; then
-            COMPOSE=(docker-compose --project-directory . -f infrastructure/docker/docker-compose.yml)
+            COMPOSE=(docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
           else
             echo "docker compose plugin not found"
             docker version || true
