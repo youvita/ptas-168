@@ -1,0 +1,235 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Test (backend)
+        run: pnpm --filter ptas168-backend test
+
+  deploy:
+    name: Deploy → Mac Mini
+    needs: ci
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: self-hosted
+    environment: Production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Write frontend production env
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://ptas168.kilozin.xyz/api' }}
+          VITE_FILE_URL: ${{ vars.VITE_FILE_URL || 'https://cdn.kilozin.xyz' }}
+        run: |
+          umask 077
+          {
+            printf 'VITE_API_URL=%s\n' "$VITE_API_URL"
+            printf 'VITE_FILE_URL=%s\n' "$VITE_FILE_URL"
+          } > apps/frontend/.env.production
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Sync build to deploy dir
+        run: |
+          DEPLOY_DIR="$HOME/apps/${{ github.event.repository.name }}"
+          mkdir -p "$DEPLOY_DIR"
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'logs/' \
+            --exclude '.env' \
+            --exclude '.env.production' \
+            --exclude '.env.development' \
+            ./ "$DEPLOY_DIR/"
+
+      - name: Materialize .env.production from secrets
+        env:
+          DATABASE_URL:                 ${{ secrets.DATABASE_URL }}
+          REDIS_URL:                    ${{ secrets.REDIS_URL }}
+          JWT_SECRET:                   ${{ secrets.JWT_SECRET }}
+          TELEGRAM_BOT_TOKEN:           ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BANK_BOT_TOKEN:      ${{ secrets.TELEGRAM_BANK_BOT_TOKEN }}
+          TELEGRAM_BANK_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_BANK_WEBHOOK_SECRET }}
+          R2_ACCOUNT_ID:                ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID:             ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY:         ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET:                    ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_URL:                ${{ secrets.R2_PUBLIC_URL }}
+          CORS_ORIGIN:                  ${{ vars.CORS_ORIGIN || 'https://ptas168.kilozin.xyz' }}
+          API_BASE_PATH:                ${{ vars.API_BASE_PATH || '/api' }}
+          FILE_URL_BASE:                ${{ vars.FILE_URL_BASE || 'https://cdn.kilozin.xyz' }}
+        run: |
+          DEPLOY_DIR="$HOME/apps/${{ github.event.repository.name }}"
+          : "${DATABASE_URL:?missing GitHub secret DATABASE_URL}"
+          : "${REDIS_URL:?missing GitHub secret REDIS_URL}"
+          : "${JWT_SECRET:?missing GitHub secret JWT_SECRET}"
+          : "${TELEGRAM_BOT_TOKEN:?missing GitHub secret TELEGRAM_BOT_TOKEN}"
+
+          umask 077
+          mkdir -p "$DEPLOY_DIR/apps/backend/uploads"
+
+          # Backend
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'PORT=3001\n'
+            printf 'DATABASE_URL=%s\n'                 "$DATABASE_URL"
+            printf 'REDIS_URL=%s\n'                    "$REDIS_URL"
+            printf 'JWT_SECRET=%s\n'                   "$JWT_SECRET"
+            printf 'JWT_EXPIRES_IN=24h\n'
+            printf 'TELEGRAM_BOT_TOKEN=%s\n'           "$TELEGRAM_BOT_TOKEN"
+            printf 'LOG_LEVEL=info\n'
+            printf 'CORS_ORIGIN=%s\n'                  "$CORS_ORIGIN"
+            printf 'UPLOAD_DIR=%s\n'                   "$DEPLOY_DIR/apps/backend/uploads"
+            printf 'FILE_URL_BASE=%s\n'                "$FILE_URL_BASE"
+            printf 'API_BASE_PATH=%s\n'                "$API_BASE_PATH"
+            printf 'TELEGRAM_BANK_BOT_TOKEN=%s\n'      "$TELEGRAM_BANK_BOT_TOKEN"
+            printf 'TELEGRAM_BANK_WEBHOOK_SECRET=%s\n' "$TELEGRAM_BANK_WEBHOOK_SECRET"
+            printf 'R2_ACCOUNT_ID=%s\n'                "$R2_ACCOUNT_ID"
+            printf 'R2_ACCESS_KEY_ID=%s\n'             "$R2_ACCESS_KEY_ID"
+            printf 'R2_SECRET_ACCESS_KEY=%s\n'         "$R2_SECRET_ACCESS_KEY"
+            printf 'R2_BUCKET=%s\n'                    "$R2_BUCKET"
+            printf 'R2_PUBLIC_URL=%s\n'                "$R2_PUBLIC_URL"
+          } > "$DEPLOY_DIR/apps/backend/.env.production"
+          chmod 600 "$DEPLOY_DIR/apps/backend/.env.production"
+
+          # Worker
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'REDIS_URL=%s\n'    "$REDIS_URL"
+            printf 'LOG_LEVEL=info\n'
+            printf 'OVERDUE_CRON=0 9 * * *\n'
+          } > "$DEPLOY_DIR/apps/worker/.env.production"
+          chmod 600 "$DEPLOY_DIR/apps/worker/.env.production"
+
+          # Telegram bot
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'DATABASE_URL=%s\n'        "$DATABASE_URL"
+            printf 'REDIS_URL=%s\n'           "$REDIS_URL"
+            printf 'LOG_LEVEL=info\n'
+            printf 'TELEGRAM_BOT_TOKEN=%s\n'  "$TELEGRAM_BOT_TOKEN"
+          } > "$DEPLOY_DIR/apps/telegram-bot/.env.production"
+          chmod 600 "$DEPLOY_DIR/apps/telegram-bot/.env.production"
+
+      - name: Apply Prisma migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          DEPLOY_DIR="$HOME/apps/${{ github.event.repository.name }}"
+          cd "$DEPLOY_DIR"
+          pnpm --filter @ptas/db deploy
+
+      - name: Reload PM2
+        run: |
+          DEPLOY_DIR="$HOME/apps/${{ github.event.repository.name }}"
+          cd "$DEPLOY_DIR"
+          mkdir -p apps/backend/logs apps/worker/logs apps/telegram-bot/logs
+          pm2 startOrReload ecosystem.config.cjs --env production
+          pm2 save
+
+      - name: Deploy frontend static files
+        env:
+          FRONTEND_DEPLOY_DIR: ${{ vars.FRONTEND_DEPLOY_DIR }}
+        run: |
+          DEPLOY_DIR="$HOME/apps/${{ github.event.repository.name }}"
+          DEST="${FRONTEND_DEPLOY_DIR:-/usr/local/Cellar/tomcat@10/10.1.52/libexec/webapps/ROOT}"
+          mkdir -p "$DEST"
+          # Preserve Tomcat metadata + the legacy on-disk upload dir if present.
+          rsync -a --delete \
+            --exclude 'WEB-INF/' \
+            --exclude 'META-INF/' \
+            --exclude 'ptas168_file/' \
+            "$DEPLOY_DIR/apps/frontend/dist/" "$DEST/"
+          echo "Frontend → $DEST"
+
+      - name: Notify Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram secrets not configured; skipping notification."
+            exit 0
+          fi
+
+          if [ "$JOB_STATUS" = "success" ]; then
+            STATUS="✅ Deployment successful"
+          else
+            STATUS="❌ Deployment failed"
+          fi
+
+          COMMIT_LINE="${COMMIT_MESSAGE%%$'\n'*}"
+
+          MESSAGE="$STATUS
+
+          Project: $REPO_NAME
+          Branch: $BRANCH
+          By: $ACTOR
+          Commit: ${COMMIT_LINE:-(manual run)}"
+
+          curl -sS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d disable_web_page_preview=true \
+            --data-urlencode text="$MESSAGE"

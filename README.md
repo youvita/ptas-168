@@ -78,6 +78,45 @@ Each process loads its own `.env.development` / `.env.production` (gitignored). 
 | telegram-bot  | `DATABASE_URL`, `REDIS_URL`, `TELEGRAM_BOT_TOKEN` (leave empty for stub mode) |
 | frontend      | `VITE_API_URL`, `VITE_FILE_URL`                                               |
 
+## CI/CD
+
+GitHub Actions at [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml):
+
+| Event | What runs |
+|-------|-----------|
+| Pull request | CI — `pnpm install`, Prisma generate, turbo build, backend tests |
+| Push to `main` (or **Run workflow**) | CI, then deploy on the self-hosted Mac Mini, then a Telegram status message |
+
+Deploy syncs the built monorepo to `$HOME/apps/Ptas168`, writes each process's `.env.production` from GitHub secrets, applies Prisma migrations, reloads PM2 (`ptas168-api`, `ptas168-worker`, `ptas168-telegram-bot`), and rsyncs the Vite `dist/` to Tomcat `ROOT` (override with the `FRONTEND_DEPLOY_DIR` variable). Seed is **not** run — `pnpm db:seed` is blocked in production.
+
+### GitHub secrets
+
+| Secret | Required | Used by |
+|--------|----------|---------|
+| `DATABASE_URL` | yes | backend, worker, telegram-bot, Prisma migrate |
+| `REDIS_URL` | yes | backend, worker, telegram-bot |
+| `JWT_SECRET` | yes | backend (≥ 32 chars) |
+| `TELEGRAM_BOT_TOKEN` | yes | Mini App / grammY bot, and deploy Telegram notify |
+| `TELEGRAM_CHAT_ID` | no* | chat/group that receives deploy success/failure |
+| `TELEGRAM_BANK_BOT_TOKEN` | no | backend bank-ingest webhook |
+| `TELEGRAM_BANK_WEBHOOK_SECRET` | no | backend bank-ingest webhook |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` / `R2_PUBLIC_URL` | no | backend uploads (disk fallback if unset) |
+
+\*Notify is skipped (deploy still succeeds) if `TELEGRAM_CHAT_ID` is missing.
+
+### GitHub variables (optional overrides)
+
+| Variable | Default |
+|----------|---------|
+| `CORS_ORIGIN` | `https://ptas168.kilozin.xyz` |
+| `VITE_API_URL` | `https://ptas168.kilozin.xyz/api` |
+| `VITE_FILE_URL` | `https://cdn.kilozin.xyz` |
+| `FILE_URL_BASE` | `https://cdn.kilozin.xyz` |
+| `API_BASE_PATH` | `/api` |
+| `FRONTEND_DEPLOY_DIR` | `/usr/local/Cellar/tomcat@10/10.1.52/libexec/webapps/ROOT` |
+
+The self-hosted runner needs Node-capable `actions/setup-node`, pnpm via Corepack, global `pm2`, rsync, and the Tomcat webapps path (or `FRONTEND_DEPLOY_DIR`). Postgres + Redis must already be reachable at `DATABASE_URL` / `REDIS_URL`.
+
 ## Per-app docs
 
 - [apps/backend/CLAUDE.md](apps/backend/CLAUDE.md) — module pattern, adapters, JWT flow
