@@ -103,14 +103,36 @@ jobs:
       - name: Build and start Docker stack
         run: |
           # LaunchAgent sessions cannot unlock osxkeychain. Isolate Docker
-          # config so public Hub pulls do not go through the GUI helper.
+          # config so public Hub pulls skip the GUI helper — but keep the
+          # Compose CLI plugin visible (a bare DOCKER_CONFIG hides it, and
+          # then `docker` treats --env-file as its own flag).
           export DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
-          mkdir -p "$DOCKER_CONFIG"
+          mkdir -p "$DOCKER_CONFIG/cli-plugins"
           printf '{}\n' > "$DOCKER_CONFIG/config.json"
+          for d in \
+            /Applications/Docker.app/Contents/Resources/cli-plugins \
+            /usr/local/lib/docker/cli-plugins \
+            "${HOME}/.docker/cli-plugins"
+          do
+            if [ -x "$d/docker-compose" ]; then
+              ln -sf "$d/docker-compose" "$DOCKER_CONFIG/cli-plugins/docker-compose"
+              break
+            fi
+          done
 
-          COMPOSE="docker compose --env-file .env -f infrastructure/docker/docker-compose.yml"
-          $COMPOSE build
-          $COMPOSE up -d postgres redis
+          if docker compose version >/dev/null 2>&1; then
+            COMPOSE=(docker compose --project-directory . -f infrastructure/docker/docker-compose.yml)
+          elif command -v docker-compose >/dev/null 2>&1; then
+            COMPOSE=(docker-compose --project-directory . -f infrastructure/docker/docker-compose.yml)
+          else
+            echo "docker compose plugin not found"
+            docker version || true
+            ls -la "$DOCKER_CONFIG/cli-plugins" || true
+            exit 1
+          fi
+
+          "${COMPOSE[@]}" build
+          "${COMPOSE[@]}" up -d postgres redis
           for i in $(seq 1 30); do
             if docker exec ptas168_postgres pg_isready -U postgres -d ptas168_dev >/dev/null 2>&1; then
               break
@@ -118,10 +140,10 @@ jobs:
             sleep 2
           done
           docker exec ptas168_postgres pg_isready -U postgres -d ptas168_dev
-          $COMPOSE run --rm --no-deps --workdir /repo --entrypoint "" backend \
+          "${COMPOSE[@]}" run --rm --no-deps --workdir /repo --entrypoint "" backend \
             pnpm --filter @ptas/db deploy
-          $COMPOSE up -d backend worker telegram-bot frontend
-          $COMPOSE ps
+          "${COMPOSE[@]}" up -d backend worker telegram-bot frontend
+          "${COMPOSE[@]}" ps
 
       - name: Notify Telegram
         if: always()
