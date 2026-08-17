@@ -102,6 +102,12 @@ jobs:
 
       - name: Build and start Docker stack
         run: |
+          # LaunchAgent sessions cannot unlock osxkeychain. Isolate Docker
+          # config so public Hub pulls do not go through the GUI helper.
+          export DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
+          mkdir -p "$DOCKER_CONFIG"
+          printf '{}\n' > "$DOCKER_CONFIG/config.json"
+
           COMPOSE="docker compose --env-file .env -f infrastructure/docker/docker-compose.yml"
           $COMPOSE build
           $COMPOSE up -d postgres redis
