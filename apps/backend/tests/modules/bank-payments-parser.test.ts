@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBankPayment } from '../../src/modules/bankPayments/parsers'
+import { parseBankPayment } from '@ptas/bank-parsers'
 
 describe('bank payment parser', () => {
   it('parses the original ABA USD payment sentence', () => {
