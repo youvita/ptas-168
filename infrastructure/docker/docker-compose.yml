@@ -36,7 +36,9 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     ports:
-      - "127.0.0.1:5432:5432"
+      # Default 5432 collides with SecureScan on this Mini Mac — override
+      # POSTGRES_PORT in the repo-root .env (5433).
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Drop *.sql / *.sh files here later to seed first-time DB creation.
@@ -60,7 +62,7 @@ services:
     # AOF persistence so queue state survives container restart.
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -119,7 +121,8 @@ services:
       R2_BUCKET: ${R2_BUCKET:-}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
     ports:
-      - "127.0.0.1:3001:3001"
+      # Default 3001 collides with SecureScan — override BACKEND_PORT (3002).
+      - "127.0.0.1:${BACKEND_PORT:-3001}:3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -196,10 +199,14 @@ services:
       dockerfile: apps/frontend/Dockerfile
       args:
         # Same-origin /api — nginx inside this container forwards to backend.
-        VITE_API_URL: /api
-        VITE_FILE_URL: /files
+        # Shared Mini Mac edge uses /ptas168 so one Cloudflare URL can serve
+        # we-testcase + SecureScan + PTAS168. Empty/default keeps `/`.
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_FILE_URL: ${VITE_FILE_URL:-/files}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     ports:
-      - "127.0.0.1:8080:80"
+      # Default 8080 collides with macmini-edge — override FRONTEND_PORT (8082).
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_started
@@ -218,6 +225,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: ptas168_cloudflared
     restart: unless-stopped
+    profiles: ["tunnel"]
     # Named tunnel mode — routes ptas168.kilozin.xyz and pos168.kilozin.xyz
     # to their respective frontend containers via host ports.
     # network_mode: host lets cloudflared reach localhost:8080 (ptas168) and

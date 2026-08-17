@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    base: '/',
+    // Shared Mini Mac edge uses /ptas168 so one Cloudflare URL can serve
+    // we-testcase + SecureScan + PTAS168. Local/dev keeps `/`.
+    base: env.VITE_BASE_PATH || process.env.VITE_BASE_PATH || '/',
   }
 })
