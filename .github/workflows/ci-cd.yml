@@ -125,8 +125,31 @@ jobs:
           ACTOR: ${{ github.actor }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
+          env_get() {
+            local key="$1" file="$2"
+            [ -f "$file" ] || return 0
+            awk -F= -v k="$key" '$1==k { print substr($0, length(k)+2); exit }' "$file"
+          }
+
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            TELEGRAM_BOT_TOKEN="$(env_get TELEGRAM_BOT_TOKEN .env)"
+          fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            TELEGRAM_BOT_TOKEN="$(env_get TELEGRAM_BOT_TOKEN "${HOME}/Projects/ptas-168/.env")"
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            TELEGRAM_CHAT_ID="$(env_get TELEGRAM_CHAT_ID .env)"
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            TELEGRAM_CHAT_ID="$(env_get TELEGRAM_CHAT_ID "${HOME}/Projects/ptas-168/.env")"
+          fi
+
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "Telegram secrets not configured; skipping notification."
+            echo "Telegram notify skipped."
+            echo "Add repository secrets (Settings → Secrets and variables → Actions),"
+            echo "not Environments: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
+            [ -n "$TELEGRAM_BOT_TOKEN" ] || echo "  missing TELEGRAM_BOT_TOKEN"
+            [ -n "$TELEGRAM_CHAT_ID" ] || echo "  missing TELEGRAM_CHAT_ID"
             exit 0
           fi
 
