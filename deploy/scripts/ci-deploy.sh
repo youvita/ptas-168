@@ -71,11 +71,31 @@ echo "==> Prisma migrate deploy"
 "${COMPOSE[@]}" run --rm --no-deps --entrypoint sh backend \
   -c 'cd /repo && pnpm --filter @ptas/db run deploy'
 
-echo "==> Rebuild apps one at a time (tunnel is not touched)"
-for svc in backend worker telegram-bot frontend; do
-  echo "==> docker compose up -d --build --no-deps ${svc}"
-  "${COMPOSE[@]}" up -d --build --no-deps "$svc"
+env_get() {
+  awk -F= -v k="$1" '$1==k { print substr($0, length(k)+2); exit }' .env
+}
+
+echo "==> Build images with docker build (do not use compose --build / bake)"
+# PTAS compose file has four buildable services. Compose v5 bake then
+# builds all of them even for `up --build backend`, and that dies in the
+# LaunchAgent. we-testcase works because its compose file has one app.
+build_image() {
+  echo "==> docker build $*" | tee -a "$LOG"
+  docker build --progress=plain "$@" 2>&1 | tee -a "$LOG"
+}
+
+build_image -f apps/backend/Dockerfile -t ptas168-backend:latest "$ROOT"
+build_image -f apps/worker/Dockerfile -t ptas168-worker:latest "$ROOT"
+build_image -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot:latest "$ROOT"
+frontend_args=()
+for key in VITE_API_URL VITE_FILE_URL VITE_BASE_PATH; do
+  val="$(env_get "$key")"
+  [[ -n "$val" ]] && frontend_args+=(--build-arg "${key}=${val}")
 done
+build_image "${frontend_args[@]}" -f apps/frontend/Dockerfile -t ptas168-frontend:latest "$ROOT"
+
+echo "==> Start apps from those images (tunnel is not touched)"
+"${COMPOSE[@]}" up -d --no-build --no-deps backend worker telegram-bot frontend
 
 echo "==> Waiting for ${HEALTH_URL}"
 for i in $(seq 1 40); do
