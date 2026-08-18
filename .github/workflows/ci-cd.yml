@@ -48,7 +48,6 @@ jobs:
     needs: ci
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
-    environment: Production
     timeout-minutes: 60
     steps:
       - name: Checkout
