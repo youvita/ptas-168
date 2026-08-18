@@ -26,7 +26,7 @@
     "docker:stack:up": "./deploy/scripts/ci-deploy.sh",
     "db:generate": "pnpm --filter @ptas/db generate",
     "db:migrate": "pnpm --filter @ptas/db migrate",
-    "db:deploy": "pnpm --filter @ptas/db deploy",
+    "db:deploy": "pnpm --filter @ptas/db run deploy",
     "db:studio": "pnpm --filter @ptas/db studio",
     "db:seed": "pnpm --filter @ptas/db seed",
     "db:demo-seed": "pnpm --filter @ptas/db demo-seed"

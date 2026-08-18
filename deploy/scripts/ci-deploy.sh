@@ -56,8 +56,10 @@ for i in $(seq 1 30); do
 done
 
 echo "==> Prisma migrate deploy"
+# `pnpm deploy` is a built-in (needs a target dir). Use `run` to hit the
+# @ptas/db script → prisma migrate deploy.
 "${COMPOSE[@]}" run --rm --no-deps --entrypoint sh backend \
-  -c 'cd /repo && pnpm --filter @ptas/db deploy'
+  -c 'cd /repo && pnpm --filter @ptas/db run deploy'
 
 echo "==> Rebuild and start apps (tunnel is not touched)"
 "${COMPOSE[@]}" up -d --build backend worker telegram-bot frontend
