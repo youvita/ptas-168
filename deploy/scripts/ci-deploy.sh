@@ -7,6 +7,37 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.docker/bin:${PATH:-/usr/bin:/bin}"
+# Compose v5 bake fails immediately in this LaunchAgent session (and hides
+# the real error behind the TTY progress UI). Classic `up --build` is enough.
+export COMPOSE_BAKE=false
+export BUILDKIT_PROGRESS=plain
+# Compose interpolates this even though the tunnel profile is never started.
+export CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
+# LaunchAgent jobs cannot unlock macOS Keychain. Docker Desktop's
+# credsStore=osxkeychain then fails the Hub pull of `docker/dockerfile:1.7`
+# (the `# syntax=` line) right after "load build definition". Use a
+# throwaway config with no credsStore, and symlink every CLI plugin so
+# Compose / Buildx stay visible (a bare DOCKER_CONFIG hid them before).
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  DOCKER_CONFIG_DIR="${RUNNER_TEMP:-/tmp}/ptas168-docker-config"
+  mkdir -p "${DOCKER_CONFIG_DIR}/cli-plugins"
+  printf '{}\n' > "${DOCKER_CONFIG_DIR}/config.json"
+  for d in \
+    /Applications/Docker.app/Contents/Resources/cli-plugins \
+    /usr/local/lib/docker/cli-plugins \
+    /opt/homebrew/lib/docker/cli-plugins \
+    "${HOME}/.docker/cli-plugins"
+  do
+    [[ -d "$d" ]] || continue
+    for plugin in "$d"/docker-*; do
+      [[ -e "$plugin" || -L "$plugin" ]] || continue
+      ln -sf "$plugin" "${DOCKER_CONFIG_DIR}/cli-plugins/$(basename "$plugin")"
+    done
+  done
+  export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+  echo "==> Isolated Docker config (no osxkeychain) at ${DOCKER_CONFIG}"
+fi
 
 if [[ ! -f .env ]]; then
   echo "Missing .env in ${ROOT}." >&2
@@ -27,6 +58,7 @@ fi
 if ! docker compose version >/dev/null 2>&1; then
   echo "docker compose plugin not found. Install Docker Desktop / Compose v2." >&2
   docker version || true
+  ls -la "${DOCKER_CONFIG:-${HOME}/.docker}/cli-plugins" >&2 || true
   exit 1
 fi
 
@@ -62,7 +94,7 @@ echo "==> Prisma migrate deploy"
   -c 'cd /repo && pnpm --filter @ptas/db run deploy'
 
 echo "==> Rebuild and start apps (tunnel is not touched)"
-"${COMPOSE[@]}" up -d --build backend worker telegram-bot frontend
+"${COMPOSE[@]}" up -d --build --no-deps backend worker telegram-bot frontend
 
 echo "==> Waiting for ${HEALTH_URL}"
 for i in $(seq 1 40); do

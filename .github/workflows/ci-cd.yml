@@ -108,6 +108,7 @@ jobs:
             printf 'R2_SECRET_ACCESS_KEY=%s\n'         "$R2_SECRET_ACCESS_KEY"
             printf 'R2_BUCKET=%s\n'                    "$R2_BUCKET"
             printf 'R2_PUBLIC_URL=%s\n'                "$R2_PUBLIC_URL"
+            printf 'CLOUDFLARE_TUNNEL_TOKEN=\n'
           } > .env
           chmod 600 .env
 
