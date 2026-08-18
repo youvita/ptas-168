@@ -94,7 +94,7 @@ Deploy rebuilds the existing Docker stack on the Mini (`ptas168_*` containers) w
 | Secret | Required | Used by |
 |--------|----------|---------|
 | `JWT_SECRET` | yes | backend (≥ 32 chars) |
-| `TELEGRAM_BOT_TOKEN` | yes | Mini App / grammY bot, and deploy Telegram notify |
+| `TELEGRAM_BOT_TOKEN` | no | Mini App / grammY bot (stub mode if empty); also used for deploy notify |
 | `TELEGRAM_CHAT_ID` | no* | chat/group that receives deploy success/failure |
 | `TELEGRAM_BANK_BOT_TOKEN` | no | backend bank-ingest webhook |
 | `TELEGRAM_BANK_WEBHOOK_SECRET` | no | backend bank-ingest webhook |

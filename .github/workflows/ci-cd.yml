@@ -54,6 +54,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Use host Docker CLI
+        run: |
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.docker/bin" >> "$GITHUB_PATH"
+
       - name: Write compose .env from secrets
         env:
           JWT_SECRET:                   ${{ secrets.JWT_SECRET }}
@@ -72,8 +78,13 @@ jobs:
           BACKEND_PORT:                 ${{ vars.BACKEND_PORT || '3002' }}
           FRONTEND_PORT:                ${{ vars.FRONTEND_PORT || '8082' }}
         run: |
-          : "${JWT_SECRET:?missing GitHub secret JWT_SECRET}"
-          : "${TELEGRAM_BOT_TOKEN:?missing GitHub secret TELEGRAM_BOT_TOKEN}"
+          if [ -z "$JWT_SECRET" ] && [ -f "${HOME}/Projects/ptas-168/.env" ]; then
+            echo "==> JWT_SECRET unset; using host ${HOME}/Projects/ptas-168/.env"
+            cp "${HOME}/Projects/ptas-168/.env" .env
+            chmod 600 .env
+            exit 0
+          fi
+          : "${JWT_SECRET:?missing GitHub secret JWT_SECRET (or keep ~/Projects/ptas-168/.env on the Mini)}"
           umask 077
           {
             printf 'POSTGRES_PORT=%s\n'                "$POSTGRES_PORT"
@@ -82,7 +93,7 @@ jobs:
             printf 'FRONTEND_PORT=%s\n'                "$FRONTEND_PORT"
             printf 'JWT_SECRET=%s\n'                   "$JWT_SECRET"
             printf 'JWT_EXPIRES_IN=24h\n'
-            printf 'TELEGRAM_BOT_TOKEN=%s\n'           "$TELEGRAM_BOT_TOKEN"
+            printf 'TELEGRAM_BOT_TOKEN=%s\n'           "${TELEGRAM_BOT_TOKEN:-unused_in_backend_set_in_telegram_bot}"
             printf 'TELEGRAM_BANK_BOT_TOKEN=%s\n'      "$TELEGRAM_BANK_BOT_TOKEN"
             printf 'TELEGRAM_BANK_WEBHOOK_SECRET=%s\n' "$TELEGRAM_BANK_WEBHOOK_SECRET"
             printf 'LOG_LEVEL=info\n'
@@ -100,56 +111,8 @@ jobs:
           } > .env
           chmod 600 .env
 
-      - name: Build and start Docker stack
-        run: |
-          # LaunchAgent sessions cannot unlock osxkeychain. Isolate Docker
-          # config so public Hub pulls skip the GUI helper — but keep CLI
-          # plugins (compose + buildx). Do not set --project-directory to
-          # the repo root: compose would resolve context `../..` to
-          # `_work/` instead of the checkout.
-          export DOCKER_CONFIG="${RUNNER_TEMP}/docker-config"
-          mkdir -p "$DOCKER_CONFIG/cli-plugins"
-          printf '{}\n' > "$DOCKER_CONFIG/config.json"
-          for d in \
-            /Applications/Docker.app/Contents/Resources/cli-plugins \
-            /usr/local/lib/docker/cli-plugins \
-            "${HOME}/.docker/cli-plugins"
-          do
-            if [ -d "$d" ]; then
-              for plugin in "$d"/docker-*; do
-                [ -e "$plugin" ] || continue
-                ln -sf "$plugin" "$DOCKER_CONFIG/cli-plugins/$(basename "$plugin")"
-              done
-              break
-            fi
-          done
-
-          ENV_FILE="${GITHUB_WORKSPACE}/.env"
-          COMPOSE_FILE="${GITHUB_WORKSPACE}/infrastructure/docker/docker-compose.yml"
-          if docker compose version >/dev/null 2>&1; then
-            COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-          elif command -v docker-compose >/dev/null 2>&1; then
-            COMPOSE=(docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-          else
-            echo "docker compose plugin not found"
-            docker version || true
-            ls -la "$DOCKER_CONFIG/cli-plugins" || true
-            exit 1
-          fi
-
-          "${COMPOSE[@]}" build
-          "${COMPOSE[@]}" up -d postgres redis
-          for i in $(seq 1 30); do
-            if docker exec ptas168_postgres pg_isready -U postgres -d ptas168_dev >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-          docker exec ptas168_postgres pg_isready -U postgres -d ptas168_dev
-          "${COMPOSE[@]}" run --rm --no-deps --workdir /repo --entrypoint "" backend \
-            pnpm --filter @ptas/db deploy
-          "${COMPOSE[@]}" up -d backend worker telegram-bot frontend
-          "${COMPOSE[@]}" ps
+      - name: Rebuild Docker stack (leave Cloudflare tunnel running)
+        run: ./deploy/scripts/ci-deploy.sh
 
       - name: Notify Telegram
         if: always()

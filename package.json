@@ -23,6 +23,7 @@
     "compose:tunnel": "docker compose --env-file .env -f infrastructure/docker/docker-compose.yml --profile tunnel up -d cloudflared",
     "compose:tunnel:url": "docker compose --env-file .env -f infrastructure/docker/docker-compose.yml logs cloudflared | grep -oE 'https://[a-z0-9-]+\\.trycloudflare\\.com' | tail -1",
     "compose:tunnel:down": "docker compose --env-file .env -f infrastructure/docker/docker-compose.yml stop cloudflared && docker compose --env-file .env -f infrastructure/docker/docker-compose.yml rm -f cloudflared",
+    "docker:stack:up": "./deploy/scripts/ci-deploy.sh",
     "db:generate": "pnpm --filter @ptas/db generate",
     "db:migrate": "pnpm --filter @ptas/db migrate",
     "db:deploy": "pnpm --filter @ptas/db deploy",
