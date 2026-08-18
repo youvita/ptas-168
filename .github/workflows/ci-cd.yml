@@ -48,6 +48,8 @@ jobs:
     needs: ci
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
+    # Secrets (JWT_SECRET, TELEGRAM_*) live on this GitHub Environment.
+    environment: Production
     timeout-minutes: 60
     steps:
       - name: Checkout
