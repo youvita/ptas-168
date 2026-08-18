@@ -2,9 +2,9 @@
 # Build context = repo root. Build with:
 #   docker build -f apps/worker/Dockerfile -t ptas168-worker .
 
-ARG NODE_VERSION=22
+ARG NODE_IMAGE=node:22-slim
 
-FROM node:${NODE_VERSION}-slim AS base
+FROM ${NODE_IMAGE} AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN apt-get update \

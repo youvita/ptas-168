@@ -17,36 +17,6 @@ export BASH_XTRACEFD=9
 set -x
 trap 'echo "ERROR line ${LINENO}: ${BASH_COMMAND}" | tee -a "$LOG" >&2' ERR
 
-# GitHub's LaunchAgent session cannot unlock macOS Keychain. Docker Desktop
-# then fails Hub metadata with:
-#   keychain cannot be accessed because the current session does not allow user interaction
-# Use a throwaway config with no credsStore (anonymous Hub pulls). Keep
-# Compose/Buildx by linking plugins + Desktop's buildx/context dirs.
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-  DOCKER_CONFIG_DIR="${RUNNER_TEMP:-/tmp}/ptas168-docker-config"
-  mkdir -p "${DOCKER_CONFIG_DIR}/cli-plugins"
-  printf '%s\n' '{"auths":{},"currentContext":"desktop-linux"}' > "${DOCKER_CONFIG_DIR}/config.json"
-  for d in \
-    /Applications/Docker.app/Contents/Resources/cli-plugins \
-    /usr/local/lib/docker/cli-plugins \
-    /opt/homebrew/lib/docker/cli-plugins \
-    "${HOME}/.docker/cli-plugins"
-  do
-    [[ -d "$d" ]] || continue
-    for plugin in "$d"/docker-*; do
-      [[ -e "$plugin" || -L "$plugin" ]] || continue
-      ln -sf "$plugin" "${DOCKER_CONFIG_DIR}/cli-plugins/$(basename "$plugin")"
-    done
-  done
-  for extra in buildx contexts; do
-    if [[ -e "${HOME}/.docker/${extra}" ]]; then
-      ln -sfn "${HOME}/.docker/${extra}" "${DOCKER_CONFIG_DIR}/${extra}"
-    fi
-  done
-  export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
-  echo "==> Isolated Docker config (no osxkeychain) at ${DOCKER_CONFIG}"
-fi
-
 if [[ ! -f .env ]]; then
   echo "Missing .env in ${ROOT}." >&2
   echo "The workflow writes it from GitHub secrets, or keep ~/Projects/ptas-168/.env on the Mini." >&2
@@ -106,18 +76,35 @@ env_get() {
 }
 
 echo "==> Build images with docker build (do not use compose --build / bake)"
-# PTAS compose file has four buildable services. Compose v5 bake then
-# builds all of them even for `up --build backend`, and that dies in the
-# LaunchAgent. we-testcase works because its compose file has one app.
+# LaunchAgent cannot unlock osxkeychain, so any Hub metadata lookup fails.
+# Use the node/nginx images already on this Mini (by image id) and never
+# contact Docker Hub during CI. Pull those bases once from a Terminal.
+local_image_id() {
+  local ref="$1"
+  if ! docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null; then
+    echo "Missing local image ${ref}." >&2
+    echo "From a Terminal (not GitHub Actions) run: docker pull ${ref}" >&2
+    exit 1
+  fi
+}
+
+NODE_IMAGE="$(local_image_id node:22-slim)"
+NGINX_IMAGE="$(local_image_id nginx:1.27-alpine)"
+echo "==> NODE_IMAGE=${NODE_IMAGE}"
+echo "==> NGINX_IMAGE=${NGINX_IMAGE}"
+
 build_image() {
   echo "==> docker build $*" | tee -a "$LOG"
   docker build --progress=plain "$@" 2>&1 | tee -a "$LOG"
 }
 
-build_image -f apps/backend/Dockerfile -t ptas168-backend:latest "$ROOT"
-build_image -f apps/worker/Dockerfile -t ptas168-worker:latest "$ROOT"
-build_image -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot:latest "$ROOT"
-frontend_args=()
+build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+  -f apps/backend/Dockerfile -t ptas168-backend:latest "$ROOT"
+build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+  -f apps/worker/Dockerfile -t ptas168-worker:latest "$ROOT"
+build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+  -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot:latest "$ROOT"
+frontend_args=(--build-arg "NODE_IMAGE=${NODE_IMAGE}" --build-arg "NGINX_IMAGE=${NGINX_IMAGE}")
 for key in VITE_API_URL VITE_FILE_URL VITE_BASE_PATH; do
   val="$(env_get "$key")"
   [[ -n "$val" ]] && frontend_args+=(--build-arg "${key}=${val}")

@@ -7,10 +7,10 @@
 # Build context = repo root. Build with:
 #   docker build -f apps/frontend/Dockerfile -t ptas168-frontend .
 
-ARG NODE_VERSION=22
+ARG NODE_IMAGE=node:22-slim
 
 # ── build ─────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-slim AS build
+FROM ${NODE_IMAGE} AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
@@ -45,7 +45,8 @@ ENV VITE_BASE_PATH=$VITE_BASE_PATH
 RUN pnpm turbo run build --filter=pbms-app...
 
 # ── runtime ───────────────────────────────────────────────────────────────
-FROM nginx:1.27-alpine AS runtime
+ARG NGINX_IMAGE=nginx:1.27-alpine
+FROM ${NGINX_IMAGE} AS runtime
 COPY apps/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/frontend/dist /usr/share/nginx/html
 EXPOSE 80
