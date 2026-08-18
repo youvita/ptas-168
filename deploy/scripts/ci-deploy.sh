@@ -17,6 +17,36 @@ export BASH_XTRACEFD=9
 set -x
 trap 'echo "ERROR line ${LINENO}: ${BASH_COMMAND}" | tee -a "$LOG" >&2' ERR
 
+# GitHub's LaunchAgent session cannot unlock macOS Keychain. Docker Desktop
+# then fails Hub metadata with:
+#   keychain cannot be accessed because the current session does not allow user interaction
+# Use a throwaway config with no credsStore (anonymous Hub pulls). Keep
+# Compose/Buildx by linking plugins + Desktop's buildx/context dirs.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  DOCKER_CONFIG_DIR="${RUNNER_TEMP:-/tmp}/ptas168-docker-config"
+  mkdir -p "${DOCKER_CONFIG_DIR}/cli-plugins"
+  printf '%s\n' '{"auths":{},"currentContext":"desktop-linux"}' > "${DOCKER_CONFIG_DIR}/config.json"
+  for d in \
+    /Applications/Docker.app/Contents/Resources/cli-plugins \
+    /usr/local/lib/docker/cli-plugins \
+    /opt/homebrew/lib/docker/cli-plugins \
+    "${HOME}/.docker/cli-plugins"
+  do
+    [[ -d "$d" ]] || continue
+    for plugin in "$d"/docker-*; do
+      [[ -e "$plugin" || -L "$plugin" ]] || continue
+      ln -sf "$plugin" "${DOCKER_CONFIG_DIR}/cli-plugins/$(basename "$plugin")"
+    done
+  done
+  for extra in buildx contexts; do
+    if [[ -e "${HOME}/.docker/${extra}" ]]; then
+      ln -sfn "${HOME}/.docker/${extra}" "${DOCKER_CONFIG_DIR}/${extra}"
+    fi
+  done
+  export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+  echo "==> Isolated Docker config (no osxkeychain) at ${DOCKER_CONFIG}"
+fi
+
 if [[ ! -f .env ]]; then
   echo "Missing .env in ${ROOT}." >&2
   echo "The workflow writes it from GitHub secrets, or keep ~/Projects/ptas-168/.env on the Mini." >&2
