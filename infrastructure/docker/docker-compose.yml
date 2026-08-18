@@ -89,6 +89,8 @@ services:
     build:
       context: ../..
       dockerfile: apps/backend/Dockerfile
+      additional_contexts:
+        nodebase: docker-image://node:22-slim
     environment:
       NODE_ENV: production
       PORT: "3001"
@@ -147,6 +149,8 @@ services:
     build:
       context: ../..
       dockerfile: apps/worker/Dockerfile
+      additional_contexts:
+        nodebase: docker-image://node:22-slim
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ptas168_dev
@@ -171,6 +175,8 @@ services:
     build:
       context: ../..
       dockerfile: apps/telegram-bot/Dockerfile
+      additional_contexts:
+        nodebase: docker-image://node:22-slim
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ptas168_dev
@@ -197,6 +203,9 @@ services:
     build:
       context: ../..
       dockerfile: apps/frontend/Dockerfile
+      additional_contexts:
+        nodebase: docker-image://node:22-slim
+        nginxbase: docker-image://nginx:1.27-alpine
       args:
         # Same-origin /api — nginx inside this container forwards to backend.
         # Shared Mini Mac edge uses /ptas168 so one Cloudflare URL can serve

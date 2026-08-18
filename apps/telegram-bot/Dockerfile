@@ -5,9 +5,10 @@
 # Build context = repo root. Build with:
 #   docker build -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot .
 
-ARG NODE_IMAGE=node:22-slim
+# Base image is supplied as a named build context (`nodebase`) so CI can
+# load the Mini's local node:22-slim without Docker Hub / osxkeychain.
 
-FROM ${NODE_IMAGE} AS base
+FROM nodebase AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN apt-get update \

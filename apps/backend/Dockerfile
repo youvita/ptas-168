@@ -1,7 +1,8 @@
 # Multi-stage build for apps/backend.
 # Build context = repo root (so the whole pnpm workspace is visible).
 # Build with:
-#   docker build -f apps/backend/Dockerfile -t ptas168-backend .
+#   docker build --build-context nodebase=docker-image://node:22-slim \
+#     -f apps/backend/Dockerfile -t ptas168-backend .
 #
 # Stages:
 #   base    — node:20-slim + pnpm 11.3 (matches packageManager pin).
@@ -10,10 +11,11 @@
 #   build   — copy sources, generate prisma client, run `turbo build`.
 #   runtime — slim image with only what's needed to run the compiled JS.
 
-ARG NODE_IMAGE=node:22-slim
+# Base image is supplied as a named build context (`nodebase`) so CI can
+# load the Mini's local node:22-slim without Docker Hub / osxkeychain.
+#   docker build --build-context nodebase=docker-image://node:22-slim ...
 
-# ── base ──────────────────────────────────────────────────────────────────
-FROM ${NODE_IMAGE} AS base
+FROM nodebase AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN apt-get update \

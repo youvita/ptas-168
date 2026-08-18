@@ -76,35 +76,36 @@ env_get() {
 }
 
 echo "==> Build images with docker build (do not use compose --build / bake)"
-# LaunchAgent cannot unlock osxkeychain, so any Hub metadata lookup fails.
-# Use the node/nginx images already on this Mini (by image id) and never
-# contact Docker Hub during CI. Pull those bases once from a Terminal.
-local_image_id() {
+# LaunchAgent cannot unlock osxkeychain. Passing FROM sha256:… still made
+# BuildKit look up docker.io/library/sha256:… on Hub. docker-image:// loads
+# the already-pulled local image and never talks to the registry.
+require_local_image() {
   local ref="$1"
-  if ! docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null; then
+  if ! docker image inspect "$ref" >/dev/null 2>&1; then
     echo "Missing local image ${ref}." >&2
     echo "From a Terminal (not GitHub Actions) run: docker pull ${ref}" >&2
     exit 1
   fi
 }
 
-NODE_IMAGE="$(local_image_id node:22-slim)"
-NGINX_IMAGE="$(local_image_id nginx:1.27-alpine)"
-echo "==> NODE_IMAGE=${NODE_IMAGE}"
-echo "==> NGINX_IMAGE=${NGINX_IMAGE}"
+require_local_image node:22-slim
+require_local_image nginx:1.27-alpine
 
 build_image() {
   echo "==> docker build $*" | tee -a "$LOG"
-  docker build --progress=plain "$@" 2>&1 | tee -a "$LOG"
+  docker build --progress=plain --provenance=false --sbom=false "$@" 2>&1 | tee -a "$LOG"
 }
 
-build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+build_image --build-context nodebase=docker-image://node:22-slim \
   -f apps/backend/Dockerfile -t ptas168-backend:latest "$ROOT"
-build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+build_image --build-context nodebase=docker-image://node:22-slim \
   -f apps/worker/Dockerfile -t ptas168-worker:latest "$ROOT"
-build_image --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
+build_image --build-context nodebase=docker-image://node:22-slim \
   -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot:latest "$ROOT"
-frontend_args=(--build-arg "NODE_IMAGE=${NODE_IMAGE}" --build-arg "NGINX_IMAGE=${NGINX_IMAGE}")
+frontend_args=(
+  --build-context nodebase=docker-image://node:22-slim
+  --build-context nginxbase=docker-image://nginx:1.27-alpine
+)
 for key in VITE_API_URL VITE_FILE_URL VITE_BASE_PATH; do
   val="$(env_get "$key")"
   [[ -n "$val" ]] && frontend_args+=(--build-arg "${key}=${val}")
