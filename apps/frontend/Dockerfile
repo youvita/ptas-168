@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Two-stage build for apps/frontend.
 #   build   — vite build with VITE_API_URL baked in (defaults to /api so the
 #             nginx layer can proxy without browser CORS).

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build for apps/telegram-bot (grammY long-polling + BullMQ
 # `telegram-send` consumer). Without TELEGRAM_BOT_TOKEN the bot runs in
 # stub mode — still consumes the queue but logs "would have sent".

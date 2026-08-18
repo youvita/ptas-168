@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build for apps/backend.
 # Build context = repo root (so the whole pnpm workspace is visible).
 # Build with:

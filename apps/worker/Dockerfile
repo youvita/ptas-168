@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Multi-stage build for apps/worker (BullMQ overdue + invoice-paid jobs).
 # Build context = repo root. Build with:
 #   docker build -f apps/worker/Dockerfile -t ptas168-worker .
