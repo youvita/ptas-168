@@ -87,14 +87,33 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+env_get() {
+  awk -F= -v k="$1" '$1==k { print substr($0, length(k)+2); exit }' .env
+}
+
+echo "==> Build app images with docker build (skip Compose bake)"
+# Compose v5 still uses bake for `up --build` even with COMPOSE_BAKE=false.
+# Bake dies in ~6s on this GitHub Actions LaunchAgent (piped stdout, no TTY).
+# we-testcase works because it builds one service; PTAS168 was building four.
+docker build --progress=plain -f apps/backend/Dockerfile -t ptas168-backend:latest "$ROOT"
+docker build --progress=plain -f apps/worker/Dockerfile -t ptas168-worker:latest "$ROOT"
+docker build --progress=plain -f apps/telegram-bot/Dockerfile -t ptas168-telegram-bot:latest "$ROOT"
+frontend_args=()
+for key in VITE_API_URL VITE_FILE_URL VITE_BASE_PATH; do
+  val="$(env_get "$key")"
+  [[ -n "$val" ]] && frontend_args+=(--build-arg "${key}=${val}")
+done
+docker build --progress=plain "${frontend_args[@]}" \
+  -f apps/frontend/Dockerfile -t ptas168-frontend:latest "$ROOT"
+
 echo "==> Prisma migrate deploy"
 # `pnpm deploy` is a built-in (needs a target dir). Use `run` to hit the
 # @ptas/db script → prisma migrate deploy.
 "${COMPOSE[@]}" run --rm --no-deps --entrypoint sh backend \
   -c 'cd /repo && pnpm --filter @ptas/db run deploy'
 
-echo "==> Rebuild and start apps (tunnel is not touched)"
-"${COMPOSE[@]}" up -d --build --no-deps backend worker telegram-bot frontend
+echo "==> Start apps from the images just built (tunnel is not touched)"
+"${COMPOSE[@]}" up -d --no-build --no-deps backend worker telegram-bot frontend
 
 echo "==> Waiting for ${HEALTH_URL}"
 for i in $(seq 1 40); do
